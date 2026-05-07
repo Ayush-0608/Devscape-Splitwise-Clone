@@ -21,7 +21,7 @@ func CreateTables(db *sql.DB) {
 	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS friends(
 		id1 INTEGER NOT NULL,
 		id2 INTEGER NOT NULL,
-		ACCEPTED BOOLEAN DEFAULT FALSE,
+		result BOOLEAN DEFAULT FALSE,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
 		CONSTRAINT fk_requester FOREIGN KEY(id1) REFERENCES users(id) ON DELETE CASCADE,
@@ -60,7 +60,7 @@ func CreateTables(db *sql.DB) {
 		group_id INTEGER NOT NULL,
 		name TEXT NOT NULL,
 		description TEXT,
-		total_amount NUMERIC(10, 2)	NOT NULL,
+		amount NUMERIC(10, 2)	NOT NULL,
 		paid_by	INTEGER	 NOT NULL,
 		split_type VARCHAR(10),
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
