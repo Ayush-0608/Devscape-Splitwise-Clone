@@ -168,7 +168,7 @@ func (s *Store) AddMember(groupID int, id int) error {
 
 func (s *Store) CheckMember(userID int, id int) (bool, error) {
 	var t int
-	err := s.DB.QueryRow("SELECT group_id FROM group_members where group_id=$1 AND user_id=$2", id, userID).Scan(&t)
+	err := s.DB.QueryRow("SELECT group_id FROM group_members WHERE group_id=$1 AND user_id=$2", id, userID).Scan(&t)
 
 	if err == sql.ErrNoRows {
 		return false, nil
@@ -186,19 +186,19 @@ func (s *Store) GetGroupDetails(id int) (*models.GroupDetails, error) {
 		return nil, err
 	}
 
-	var members []int
-	rows, err := s.DB.Query("SELECT group_members.user_id FROM group_members JOIN groups ON group_members.group_id=groups.id WHERE group_members.group_id=$1", id)
+	var members []models.PublicUser
+	rows, err := s.DB.Query("SELECT group_members.user_id, users.fullname, users.email FROM group_members JOIN groups ON group_members.group_id=groups.id JOIN users ON group_members.user_id=users.id  WHERE group_members.group_id=$1", id)
 	if err != nil {
 		return nil, err
 	}
 
 	for rows.Next() {
-		var member *int
-		err := rows.Scan(&member)
+		var member models.PublicUser
+		err := rows.Scan(&member.ID, &member.Fullname, &member.Email)
 		if err != nil {
 			return nil, err
 		}
-		members = append(members, *member)
+		members = append(members, member)
 	}
 
 	details.Members = members
@@ -226,4 +226,249 @@ func (s *Store) GetExpenses(groupID int) (*[]models.Expense, error) {
 		expenses = append(expenses, *expense)
 	}
 	return &expenses, nil
+}
+
+func (s *Store) GetExpenseGroup(id int) (int, error) {
+	var groupID int
+	err := s.DB.QueryRow("SELECT group_id FROM expenses WHERE id=$1", id).Scan(&groupID)
+
+	if err != nil {
+		return 0, err
+	}
+	return groupID, nil
+}
+
+func (s *Store) RemoveExpense(id int) error {
+	_, err := s.DB.Exec("DELETE FROM expenses WHERE id=$1", id)
+	return err
+}
+
+func (s *Store) CheckValidity(splits []models.Split, id int, splitType string) (int, int, error) {
+	groupID, err := s.GetExpenseGroup(id)
+	if err != nil {
+		return 0, -1, err
+	}
+
+	var t int
+	err = s.DB.QueryRow("SELECT id FROM splits WHERE expense_id=$1", id).Scan(&t)
+
+	if err == nil {
+		return 0, -1, fmt.Errorf("expense already split")
+	}
+
+	var amount int
+	err = s.DB.QueryRow("SELECT amount FROM expenses WHERE id=$1", id).Scan(&amount)
+	if err != nil {
+		return 0, -1, err
+	}
+
+	sum := 0
+	count := 0
+
+	for _, split := range splits {
+		_, err := s.CheckMember(split.UserID, groupID)
+		if err != nil {
+			return 0, -1, err
+		}
+
+		if split.Value < 0 {
+			return 0, -1, fmt.Errorf("invalid split value")
+		}
+
+		sum += split.Value
+		count++
+	}
+
+	if splitType == "Amount" && sum > amount {
+		return 0, -1, fmt.Errorf("split amounts exceed expense amount")
+	}
+
+	if splitType == "Percentage" && sum > 100 {
+		return 0, -1, fmt.Errorf("invalid split amounts")
+	}
+
+	var payer int
+	err = s.DB.QueryRow("SELECT paid_by FROM expenses WHERE id=$1", id).Scan(&payer)
+	if err != nil {
+		return 0, -1, err
+	}
+
+	return sum, count, nil
+}
+
+func (s *Store) MemberCount(groupID int) (int, error) {
+	var count int
+	err := s.DB.QueryRow("SELECT count(*) FROM group_members WHERE group_id=$1", groupID).Scan(&count)
+	if err != nil {
+		return -1, err
+	}
+	return count, nil
+}
+
+func (s *Store) AddSplits(splits []models.Split, splitType string, id int, sum int, member_count int, count int) error {
+	var amount int
+	err := s.DB.QueryRow("SELECT amount FROM expenses WHERE id=$1", id).Scan(&amount)
+	if err != nil {
+		return err
+	}
+
+	groupID, err := s.GetExpenseGroup(id)
+	if err != nil {
+		return err
+	}
+
+	var members []int
+	rows, err := s.DB.Query("SELECT group_members.user_id FROM group_members JOIN groups ON group_members.group_id=groups.id WHERE group_members.group_id=$1", groupID)
+	if err != nil {
+		return err
+	}
+
+	for rows.Next() {
+		var member int
+		err := rows.Scan(&member)
+		if err != nil {
+			return err
+		}
+		members = append(members, member)
+	}
+
+	if splitType == "Equal" {
+		for _, member := range members {
+			_, err = s.DB.Exec("INSERT INTO splits(expense_id, user_id, amount_owed) VALUES($1, $2, $3)", id, member, amount/member_count)
+			if err != nil {
+				return err
+			}
+		}
+	} else if splitType == "Amount" {
+		for _, member := range members {
+			var temp int
+			yes := false
+			for _, split := range splits {
+				if member == split.UserID {
+					yes = true
+					temp = split.Value
+				}
+			}
+			if !yes {
+				temp = (amount - sum) / (member_count - count)
+			}
+			if temp != 0 {
+				_, err = s.DB.Exec("INSERT INTO splits(expense_id, user_id, amount_owed) VALUES($1, $2, $3)", id, member, temp)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	} else {
+		for _, member := range members {
+			var temp int
+			yes := false
+			for _, split := range splits {
+				if member == split.UserID {
+					yes = true
+					temp = split.Value * amount / 100
+				}
+			}
+			if !yes {
+				temp = amount * (100 - sum) / 100 / (member_count - count)
+			}
+			_, err = s.DB.Exec("INSERT INTO splits(expense_id, user_id, amount_owed) VALUES($1, $2, $3)", id, member, temp)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	_, err = s.DB.Exec("UPDATE expenses SET split_type=$1 WHERE id=$2", splitType, id)
+	if err != nil {
+		return err
+	}
+
+	var paidBY int
+	err = s.DB.QueryRow("SELECT paid_by FROM expenses WHERE id=$1", id).Scan(&paidBY)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec("UPDATE splits SET status=$1 WHERE user_id=$2", true, paidBY)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) GetBalances(userID int, set *[]models.PublicUser) (*models.Balance, error) {
+	balances := new(models.Balance)
+
+	for _, user := range *set {
+		balance := models.Slot{}
+
+		rows, err := s.DB.Query("SELECT splits.id, splits.amount_owed, splits.expense_id, users.Fullname FROM splits JOIN expenses ON splits.expense_id=expenses.id JOIN users ON expenses.paid_by=users.id WHERE splits.user_id=$1 AND expenses.paid_by=$2 AND splits.status=$3", userID, user.ID, false)
+		if err != nil && err != sql.ErrNoRows {
+			return balances, err
+		}
+		for rows.Next() {
+			rows.Scan(&balance.SplitID, &balance.Value, &balance.ExpenseID, &balance.Name)
+			if balance.Value != 0 {
+				balance.UserID = user.ID
+				balances.OwedTo = append(balances.OwedTo, balance)
+			}
+		}
+		rows, err = s.DB.Query("SELECT splits.id, splits.amount_owed, splits.expense_id, users.Fullname FROM splits JOIN expenses ON splits.expense_id=expenses.id JOIN users ON expenses.paid_by=users.id WHERE splits.user_id=$1 AND expenses.paid_by=$2 AND splits.status=$3", user.ID, userID, false)
+		if err != nil && err != sql.ErrNoRows {
+			return balances, err
+		}
+		for rows.Next() {
+			rows.Scan(&balance.SplitID, &balance.Value, &balance.ExpenseID, &balance.Name)
+			if balance.Value != 0 {
+				balance.UserID = user.ID
+				balances.OwedTo = append(balances.OwedTo, balance)
+			}
+		}
+	}
+	return balances, nil
+}
+
+func (s *Store) GetGroupBalances(userID int, groupID int) (*models.Balance, error) {
+	balances := new(models.Balance)
+
+	details, err := s.GetGroupDetails(groupID)
+	if err != nil && err != sql.ErrNoRows {
+		return balances, err
+	}
+
+	for _, user := range details.Members {
+		balance := models.Slot{}
+
+		rows, err := s.DB.Query("SELECT splits.id, splits.amount_owed, splits.expense_id, users.Fullname FROM splits JOIN expenses ON splits.expense_id=expenses.id JOIN users ON expenses.paid_by=users.id WHERE splits.user_id=$1 AND expenses.paid_by=$2 AND expenses.group_id=$3 AND splits.status=$4", userID, user.ID, groupID, false)
+		if err != nil && err != sql.ErrNoRows {
+			return balances, err
+		}
+		for rows.Next() {
+			rows.Scan(&balance.SplitID, &balance.Value, &balance.ExpenseID, &balance.Name)
+			if balance.Value != 0 {
+				balance.UserID = user.ID
+				balances.OwedTo = append(balances.OwedTo, balance)
+			}
+		}
+		rows, err = s.DB.Query("SELECT splits.id, splits.amount_owed, splits.expense_id, users.Fullname FROM splits JOIN expenses ON splits.expense_id=expenses.id JOIN users ON expenses.paid_by=users.id WHERE splits.user_id=$1 AND expenses.paid_by=$2 AND expenses.group_id=$3 AND splits.status=$4", user.ID, userID, groupID, false)
+		if err != nil && err != sql.ErrNoRows {
+			return balances, err
+		}
+		for rows.Next() {
+			rows.Scan(&balance.SplitID, &balance.Value, &balance.ExpenseID, &balance.Name)
+			if balance.Value != 0 {
+				balance.UserID = user.ID
+				balances.OwedTo = append(balances.OwedTo, balance)
+			}
+		}
+	}
+	return balances, nil
+}
+
+func (s *Store) MarkPaid(userID int, id int) error {
+	_, err := s.DB.Exec("UPDATE splits SET status=$1 WHERE expense_id=$2 AND user_id=$3", true, id, userID)
+	if err != nil {
+		return err
+	}
+	return nil
 }

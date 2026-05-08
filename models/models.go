@@ -22,6 +22,14 @@ type UserStore interface {
 	GetGroupDetails(id int) (*GroupDetails, error)
 	AddExpense(e NewExpense) error
 	GetExpenses(groupID int) (*[]Expense, error)
+	GetExpenseGroup(id int) (int, error)
+	RemoveExpense(id int) error
+	CheckValidity(splits []Split, id int, splitType string) (int, int, error)
+	MemberCount(groupID int) (int, error)
+	AddSplits(splits []Split, splitType string, id int, sum int, member_count int, count int) error
+	GetBalances(userID int, set *[]PublicUser) (*Balance, error)
+	GetGroupBalances(userID int, groupID int) (*Balance, error)
+	MarkPaid(userID int, id int) error
 }
 
 type RegUser struct {
@@ -72,11 +80,11 @@ type Group struct {
 }
 
 type GroupDetails struct {
-	ID        int       `json:"id"`
-	Name      string    `json:"name"`
-	CreatedBy int       `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
-	Members   []int     `json:"members"`
+	ID        int          `json:"id"`
+	Name      string       `json:"name"`
+	CreatedBy int          `json:"created_by"`
+	CreatedAt time.Time    `json:"created_at"`
+	Members   []PublicUser `json:"members"`
 }
 
 type SimpleID struct {
@@ -88,17 +96,35 @@ type Expense struct {
 	GroupID     int       `json:"group_id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
-	Amount      float64   `json:"amount"`
+	Amount      int       `json:"amount"`
 	PaidBy      int       `json:"paid_by"`
 	SplitType   string    `json:"split_type"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
 type NewExpense struct {
-	GroupID     int     `json:"group_id" validate:"required"`
-	Name        string  `json:"name" validate:"required"`
-	Description string  `json:"description"`
-	Amount      float64 `json:"amount" validate:"required,gt=0"`
-	PaidBy      int     `json:"paid_by" validate:"required"`
-	SplitType   string  `json:"split_type"`
+	GroupID     int    `json:"group_id" validate:"required"`
+	Name        string `json:"name" validate:"required"`
+	Description string `json:"description"`
+	Amount      int    `json:"amount" validate:"required,gt=0"`
+	PaidBy      int    `json:"paid_by" validate:"required"`
+	SplitType   string `json:"split_type"`
+}
+
+type Split struct {
+	UserID int `json:"user_id"`
+	Value  int `json:"value"`
+}
+
+type Slot struct {
+	SplitID   int    `json:"split_id"`
+	UserID    int    `json:"user_id"`
+	Name      string `json:"name"`
+	ExpenseID int    `json:"expense_id"`
+	Value     int    `json:"value"`
+}
+
+type Balance struct {
+	OwedTo []Slot `json:"owedto"`
+	OwedBy []Slot `json:"owedby"`
 }

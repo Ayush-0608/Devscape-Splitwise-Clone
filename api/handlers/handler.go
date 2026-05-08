@@ -410,19 +410,19 @@ func (h *Handler) LogExpense(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	utils.WriteJSON(w, http.StatusOK, nil)
+	utils.WriteJSON(w, http.StatusCreated, nil)
 }
 
 func (h *Handler) GroupExpenses(w http.ResponseWriter, r *http.Request) {
 	userID := auth.GetUserIDFromContext(r.Context())
 
-	var other models.SimpleID
-	if err := utils.ParseJSON(r, &other); err != nil {
+	var group models.SimpleID
+	if err := utils.ParseJSON(r, &group); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	ans, err := h.Store.CheckMember(userID, other.ID)
+	ans, err := h.Store.CheckMember(userID, group.ID)
 	if err != nil {
 		utils.WriteError(w, http.StatusBadRequest, err)
 		return
@@ -433,11 +433,178 @@ func (h *Handler) GroupExpenses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expenses, err := h.Store.GetExpenses(other.ID)
+	expenses, err := h.Store.GetExpenses(group.ID)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusFound, expenses)
+}
+
+func (h *Handler) DeleteExpense(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserIDFromContext(r.Context())
+
+	params := mux.Vars(r)
+	id, _ := strconv.Atoi(params["id"])
+
+	groupID, err := h.Store.GetExpenseGroup(id)
 	if err != nil {
 		utils.WriteError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	utils.WriteJSON(w, http.StatusFound, expenses)
+	ans, err := h.Store.CheckMember(userID, groupID)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if !ans {
+		utils.WriteError(w, http.StatusForbidden, fmt.Errorf("unauthorized operation"))
+		return
+	}
+
+	err = h.Store.RemoveExpense(id)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, nil)
+
+}
+
+func (h *Handler) Split(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserIDFromContext(r.Context())
+
+	params := mux.Vars(r)
+	id, _ := strconv.Atoi(params["id"])
+
+	groupID, err := h.Store.GetExpenseGroup(id)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	ans, err := h.Store.CheckMember(userID, groupID)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if !ans {
+		utils.WriteError(w, http.StatusForbidden, fmt.Errorf("unauthorized operation"))
+		return
+	}
+
+	var payload struct {
+		SplitType string         `json:"split_type"`
+		Splits    []models.Split `json:"splits"`
+	}
+	if err := utils.ParseJSON(r, &payload); err != nil {
+		utils.WriteError(w, http.StatusEarlyHints, err)
+		return
+	}
+
+	if payload.SplitType != "Equal" && payload.SplitType != "Amount" && payload.SplitType != "Percentage" {
+		utils.WriteError(w, http.StatusBadRequest, fmt.Errorf("invalid split type"))
+		return
+	}
+
+	sum, count, err := h.Store.CheckValidity(payload.Splits, id, payload.SplitType)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	member_count, err := h.Store.MemberCount(groupID)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	err = h.Store.AddSplits(payload.Splits, payload.SplitType, id, sum, member_count, count)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusCreated, nil)
+}
+
+func (h *Handler) Balances(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserIDFromContext(r.Context())
+
+	users, err := h.Store.GetUsers(userID)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	balances, err := h.Store.GetBalances(userID, users)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusFound, *balances)
+}
+
+func (h *Handler) GroupBalances(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserIDFromContext(r.Context())
+
+	params := mux.Vars(r)
+	groupID, _ := strconv.Atoi(params["id"])
+
+	ans, err := h.Store.CheckMember(userID, groupID)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if !ans {
+		utils.WriteError(w, http.StatusForbidden, fmt.Errorf("unauthorized operation"))
+		return
+	}
+
+	balances, err := h.Store.GetGroupBalances(userID, groupID)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusFound, *balances)
+}
+
+func (h *Handler) Settle(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserIDFromContext(r.Context())
+
+	params := mux.Vars(r)
+	id, _ := strconv.Atoi(params["id"])
+
+	groupID, err := h.Store.GetExpenseGroup(id)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	ans, err := h.Store.CheckMember(userID, groupID)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if !ans {
+		utils.WriteError(w, http.StatusForbidden, fmt.Errorf("unauthorized operation"))
+		return
+	}
+
+	err = h.Store.MarkPaid(userID, id)
+	if err != nil {
+		utils.WriteError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	utils.WriteJSON(w, http.StatusOK, nil)
 }

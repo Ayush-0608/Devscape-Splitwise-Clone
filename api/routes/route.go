@@ -24,5 +24,10 @@ func SetupRoutes(h *handlers.Handler) *mux.Router {
 	r.HandleFunc("/groups/{id}", auth.WithJWTAuth(h.AddMember, h.Store)).Methods("POST")
 	r.HandleFunc("/expenses", auth.WithJWTAuth(h.LogExpense, h.Store)).Methods("POST")
 	r.HandleFunc("/expenses", auth.WithJWTAuth(h.GroupExpenses, h.Store)).Methods("GET")
+	r.HandleFunc("/expenses/{id}", auth.WithJWTAuth(h.DeleteExpense, h.Store)).Methods("DELETE")
+	r.HandleFunc("/expenses/{id}/split", auth.WithJWTAuth(h.Split, h.Store)).Methods("POST")
+	r.HandleFunc("/balance", auth.WithJWTAuth(h.Balances, h.Store)).Methods("GET")
+	r.HandleFunc("/groups/{id}/balance", auth.WithJWTAuth(h.GroupBalances, h.Store)).Methods("GET")
+	r.HandleFunc("/expenses/{id}", auth.WithJWTAuth(h.Settle, h.Store)).Methods("PUT")
 	return r
 }

@@ -60,7 +60,7 @@ func CreateTables(db *sql.DB) {
 		group_id INTEGER NOT NULL,
 		name TEXT NOT NULL,
 		description TEXT,
-		amount NUMERIC(10, 2)	NOT NULL,
+		amount INTEGER	NOT NULL,
 		paid_by	INTEGER	 NOT NULL,
 		split_type VARCHAR(10),
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -76,8 +76,8 @@ func CreateTables(db *sql.DB) {
 		id SERIAL PRIMARY KEY,
 		expense_id INTEGER NOT NULL,
 		user_id	INTEGER NOT NULL,
-		amount_owed	NUMERIC(10, 2) NOT NULL,
-		staus BOOLEAN DEFAULT FALSE,
+		amount_owed	INTEGER NOT NULL,
+		status BOOLEAN DEFAULT FALSE,
 
 		CONSTRAINT fk_expense FOREIGN KEY(expense_id) REFERENCES expenses(id) ON DELETE CASCADE,
 		CONSTRAINT fk_user FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
