@@ -421,7 +421,7 @@ func (s *Store) GetBalances(userID int, set *[]models.PublicUser) (*models.Balan
 			rows.Scan(&balance.SplitID, &balance.Value, &balance.ExpenseID, &balance.Name)
 			if balance.Value != 0 {
 				balance.UserID = user.ID
-				balances.OwedTo = append(balances.OwedTo, balance)
+				balances.OwedBy = append(balances.OwedBy, balance)
 			}
 		}
 	}
@@ -458,7 +458,7 @@ func (s *Store) GetGroupBalances(userID int, groupID int) (*models.Balance, erro
 			rows.Scan(&balance.SplitID, &balance.Value, &balance.ExpenseID, &balance.Name)
 			if balance.Value != 0 {
 				balance.UserID = user.ID
-				balances.OwedTo = append(balances.OwedTo, balance)
+				balances.OwedBy = append(balances.OwedBy, balance)
 			}
 		}
 	}
